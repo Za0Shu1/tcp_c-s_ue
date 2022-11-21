@@ -72,3 +72,5 @@ Plugins/*/Intermediate/*
 
 # Cache files for the editor to use
 DerivedDataCache/*
+tcp_cs_ue/Binaries/
+tcp_cs_ue/Intermediate/
