@@ -49,15 +49,29 @@ protected:
 	UFUNCTION()
 		void OnDisConnected(USocketThread* pThread);
 
+	UFUNCTION()
+		void OnReceiveHeartbeat(USocketThread* ConnThread);
+
+	UPROPERTY()
+		TMap<USocketThread*, int32> SocketOnlineCheckCount;
+
+	UFUNCTION()
+		void HeartbeatCheck();
+	
 private:
 	int32 SendDataSize = 1024;
 	int32 ReceiveDataSize = 1024;
 
 	// Connect check timer handle
 	FTimerHandle ConnectCheckHandle;
+	// Heartbeat check timer handle
+	FTimerHandle HeartbeatCheckHandle;
 
 	FSocket* Socket;
 	FSocket* RecSocket;
+	int32 ExpiryCount = 5;// heartbeart check count
 
-	TArray<class USocketThread*> RecThreads;
+	// avoid gc
+	UPROPERTY()
+		TArray<class USocketThread*> ConnThreads;
 };

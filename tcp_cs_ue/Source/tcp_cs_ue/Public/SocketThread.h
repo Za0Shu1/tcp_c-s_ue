@@ -15,7 +15,7 @@ DECLARE_LOG_CATEGORY_EXTERN(LogTCPSocketThread, Log, All);
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FReceiveSocketDataDelegate, FString, Data); 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FLostConnectionDelegate, USocketThread*, Thread);
-
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnReceiveHeartbeat, USocketThread*, SocketThread);
 
 UCLASS()
 class TCP_CS_UE_API USocketThread : public UObject,public FRunnable
@@ -24,6 +24,7 @@ class TCP_CS_UE_API USocketThread : public UObject,public FRunnable
 public:
 	FReceiveSocketDataDelegate ReceiveSocketDataDelegate;
 	FLostConnectionDelegate	LostConnectionDelegate;
+	FOnReceiveHeartbeat ReceiveHeartbeatDelegate;
 
 	void InitializeThread(FSocket* Socket, uint32 SizeSend, uint32 SizeRec);
 	void SendData(FString Msg);

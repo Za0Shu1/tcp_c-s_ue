@@ -51,6 +51,12 @@ protected:
 
 	UFUNCTION()
 		void OnDisConnected(USocketThread* pThread);
+	
+	UFUNCTION()
+		void SendHeartbeat();
+
+	UFUNCTION()
+		void ConnectTaskComplete(bool bSuccess);
 private:
 	bool bShutDown = false;
 	bool bConnecting = false;
@@ -61,6 +67,15 @@ private:
 	int32 serverPort;
 
 	FSocket* Socket;
-	USocketThread* RecThread;
+
+	FTimerHandle SendHeartbeatHandle;
+	
+	// avoid gc
+	UPROPERTY()
+		USocketThread* RecThread;
+
+	bool bIsReconnecting = false;
+	int32 ReconnectCount = 0;// reconnect try count
+	int32 ReconnectFailedCount = 12;// reconnect max try count
 
 };

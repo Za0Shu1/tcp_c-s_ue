@@ -35,7 +35,10 @@ uint32 USocketThread::Run()
 			{
 				UE_LOG(LogTCPSocketThread, Warning, TEXT("Connection Lost!"));
 				Stop();
-				LostConnectionDelegate.Broadcast(this);
+				AsyncTask(ENamedThreads::GameThread, [this]()
+					{
+						LostConnectionDelegate.Broadcast(this);
+					});
 				continue;
 			}
 		}
@@ -49,22 +52,36 @@ uint32 USocketThread::Run()
 			if (!ConnectSocket->Recv(ReceiveData.GetData(), minSize, readBytes))
 			{
 				UE_LOG(LogTCPSocketThread, Warning, TEXT("Connection Lost!"));
-				LostConnectionDelegate.Broadcast(this);
+				AsyncTask(ENamedThreads::GameThread, [this]()
+					{
+						LostConnectionDelegate.Broadcast(this);
+					});
 				continue;
 			}
 
 			// convert to string
 			FString ReceiveStr = FString(UTF8_TO_TCHAR(ReceiveData.GetData()));
-			if (ReceiveSocketDataDelegate.IsBound())
+			
+			if (ReceiveStr == "HeartbeatCheck")
 			{
-				AsyncTask(ENamedThreads::GameThread, [=]()
-					{
-						ReceiveSocketDataDelegate.Broadcast(ReceiveStr);
-					});
+				if (ReceiveHeartbeatDelegate.IsBound())
+				{
+					ReceiveHeartbeatDelegate.Broadcast(this);
+				}
 			}
 			else
 			{
-				UE_LOG(LogTCPSocketThread, Warning, TEXT("No ReceiveSocketData Delegate bound."));
+				if (ReceiveSocketDataDelegate.IsBound())
+				{
+					AsyncTask(ENamedThreads::GameThread, [=]()
+						{
+							ReceiveSocketDataDelegate.Broadcast(ReceiveStr);
+						});
+				}
+				else
+				{
+					UE_LOG(LogTCPSocketThread, Warning, TEXT("No ReceiveSocketData Delegate bound."));
+				}
 			}
 		}
 		ReceiveData.Empty();

@@ -33,6 +33,7 @@ bool UServerObject::CreateTCPServer(const FString& ServerIP, int32 ServerPort, i
 	{
 		// check connection per seconds
 		this->GetWorld()->GetTimerManager().SetTimer(ConnectCheckHandle, this, &UServerObject::ConnectTickCheck, 1, true);
+		this->GetWorld()->GetTimerManager().SetTimer(HeartbeatCheckHandle, this, &UServerObject::HeartbeatCheck, 5, true);
 	}
 	else
 	{
@@ -49,11 +50,12 @@ void UServerObject::ConnectTickCheck()
 	{
 		TSharedRef<FInternetAddr> RemoteAddress = ISocketSubsystem::Get(PLATFORM_SOCKETSUBSYSTEM)->CreateInternetAddr();
 		RecSocket = Socket->Accept(*RemoteAddress, TEXT("Receive Socket"));
-		USocketThread* RSThread = NewObject<USocketThread>(this);
-		RecThreads.Add(RSThread);
-		RSThread->ReceiveSocketDataDelegate = ReceiveSocketDataDelegate;
-		RSThread->LostConnectionDelegate.AddDynamic(this, &UServerObject::OnDisConnected);
-		RSThread->InitializeThread(RecSocket, SendDataSize, ReceiveDataSize);
+		USocketThread* ConnThread = NewObject<USocketThread>(this);
+		ConnThreads.Add(ConnThread);
+		ConnThread->ReceiveSocketDataDelegate = ReceiveSocketDataDelegate;
+		ConnThread->LostConnectionDelegate.AddDynamic(this, &UServerObject::OnDisConnected);
+		ConnThread->ReceiveHeartbeatDelegate.AddDynamic(this, &UServerObject::OnReceiveHeartbeat);
+		ConnThread->InitializeThread(RecSocket, SendDataSize, ReceiveDataSize);
 		ClientConnectDelegate.Broadcast(RemoteAddress->ToString(false), RemoteAddress->GetPort());
 	}
 	if (!ReceiveSocketDataDelegate.IsBound())
@@ -71,22 +73,56 @@ void UServerObject::BeginDestroy()
 void UServerObject::OnDisConnected(USocketThread* pThread)
 {
 	UE_LOG(LogTemp, Warning, TEXT("Client lost"));
-	RecThreads.Remove(pThread);
+	ConnThreads.Remove(pThread);
 	
+}
+
+void UServerObject::OnReceiveHeartbeat(USocketThread* ConnThread)
+{
+	// reset num
+	SocketOnlineCheckCount.Add(ConnThread, 0);
+}
+
+void UServerObject::HeartbeatCheck()
+{
+	if (ConnThreads.Num() == 0) return;
+
+	// 计数自增
+	for (TPair<USocketThread*, int32>& element : SocketOnlineCheckCount) {
+		++(element).Value;
+	}
+
+	// 寻找掉线的客户端
+	TArray<USocketThread*> ClearSockets;
+	for (TPair<USocketThread*, int32>& element : SocketOnlineCheckCount) {
+		if ((element).Value >= ExpiryCount)
+		{
+			ClearSockets.Add((element).Key);
+		}
+	}
+
+	// 清理掉线的客户端
+	for (auto so : ClearSockets)
+	{
+		SocketOnlineCheckCount.Remove(so);
+		ConnThreads.Remove(so);
+		so->Stop();
+	}
 }
 
 void UServerObject::ShutDownServer()
 {
 	if (Socket)
 	{
-		for (auto RecThread : RecThreads)
+		for (auto conn : ConnThreads)
 		{
-			RecThread->Stop();
+			conn->Stop();
 		}
 		Socket->Close();
 		ISocketSubsystem::Get(PLATFORM_SOCKETSUBSYSTEM)->DestroySocket(Socket);
 		Socket = nullptr;
 	}
+
 	if (RecSocket)
 	{
 		RecSocket->Close();
@@ -97,7 +133,7 @@ void UServerObject::ShutDownServer()
 
 void UServerObject::SendDataToClient(FString Msg)
 {
-	for (auto SocketThread : RecThreads)
+	for (auto SocketThread : ConnThreads)
 	{
 		SocketThread->SendData(Msg);
 	}

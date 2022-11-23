@@ -23,6 +23,7 @@ bool UClientObject::CreateAndConnect(const FString& ServerIP, int32 ServerPort, 
 
 	if (Socket)
 	{
+		this->ConnectResultDelegate.AddDynamic(this, &UClientObject::ConnectTaskComplete);
 		ConnectServer(ServerIP, ServerPort);
 	}
 	else
@@ -80,7 +81,13 @@ void UClientObject::ConnectServer(FString ServerIP, int32 ServerPort)
 			if (!bSuccess)
 			{
 				UE_LOG(LogTCPClient, Error, TEXT("Server IP %s is invalid!"), *serverIP);
-				ConnectResultDelegate.Broadcast(false);
+				AsyncTask(ENamedThreads::GameThread, [this]()
+					{
+						if (ConnectResultDelegate.IsBound())
+						{
+							ConnectResultDelegate.Broadcast(false);
+						}
+					});
 				return;
 			}
 			Addr->SetPort(serverPort);
@@ -88,15 +95,18 @@ void UClientObject::ConnectServer(FString ServerIP, int32 ServerPort)
 			// Connect Server
 			if (!bShutDown && Socket->Connect(*Addr))
 			{
-				RecThread = NewObject<USocketThread>();
+				RecThread = NewObject<USocketThread>(this);
 				RecThread->ReceiveSocketDataDelegate = ReceiveSocketDataDelegate;
 				RecThread->LostConnectionDelegate.AddDynamic(this, &UClientObject::OnDisConnected);
 				RecThread->InitializeThread(Socket, SendDataSize, ReceiveDataSize);
 
-				if (ConnectResultDelegate.IsBound())
-				{
-					ConnectResultDelegate.Broadcast(true);
-				}
+				AsyncTask(ENamedThreads::GameThread, [this]()
+					{
+						if (ConnectResultDelegate.IsBound())
+						{
+							ConnectResultDelegate.Broadcast(true);
+						}
+					});
 			}
 			else
 			{
@@ -105,7 +115,13 @@ void UClientObject::ConnectServer(FString ServerIP, int32 ServerPort)
 				UE_LOG(LogTCPClient, Warning, TEXT("Connect failed with error code (%d) error (%s)"), LastErr, ISocketSubsystem::Get(PLATFORM_SOCKETSUBSYSTEM)->GetSocketError(LastErr));
 				if (!bShutDown && ConnectResultDelegate.IsBound())
 				{
-					ConnectResultDelegate.Broadcast(false);
+					AsyncTask(ENamedThreads::GameThread, [this]()
+						{
+							if (ConnectResultDelegate.IsBound())
+							{
+								ConnectResultDelegate.Broadcast(false);
+							}
+						});
 				}
 			}
 			bConnecting = false;
@@ -122,6 +138,14 @@ void UClientObject::ReconnectServer()
 		.WithReceiveBufferSize(ReceiveDataSize)
 		.WithSendBufferSize(SendDataSize);
 
+	if (ReconnectCount >= ReconnectFailedCount)
+	{
+		UE_LOG(LogTCPClient, Error, TEXT("Can not connect server,Check your network."));
+		bIsReconnecting = false;
+		return;
+	}
+
+	UE_LOG(LogTCPClient, Warning, TEXT("Client Reconneting...Try Times : %d"), ReconnectCount);
 	ConnectServer(serverIP,serverPort);
 }
 
@@ -133,4 +157,35 @@ void UClientObject::OnDisConnected(USocketThread* pThread)
 	{
 		ConnectResultDelegate.Broadcast(false);
 	}
+
+	bIsReconnecting = true;
+	// try to reconnect server
+	ReconnectServer();
+}
+
+void UClientObject::SendHeartbeat()
+{
+	if (Socket)
+	{
+		SendDataToServer("HeartbeatCheck");
+	}
+}
+
+
+void UClientObject::ConnectTaskComplete(bool bSuccess)
+{
+	if (bSuccess)
+	{
+		// 客户端定时发送心跳包
+		GetWorld()->GetTimerManager().SetTimer(SendHeartbeatHandle, this, &UClientObject::SendHeartbeat, 5.f, true);
+		bIsReconnecting = false;
+	}
+	else if (bIsReconnecting)
+	{
+		ReconnectCount++;
+		// 连接失败 5s后重试
+		FTimerHandle ReConnectHandle;
+		GetWorld()->GetTimerManager().SetTimer(ReConnectHandle, this, &UClientObject::ReconnectServer, 5.f, false);
+	}
+	
 }
